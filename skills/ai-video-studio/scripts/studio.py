@@ -262,6 +262,33 @@ import shutil
 import tempfile
 
 
+def _detect_cjk_font() -> str:
+    """Auto-detect a CJK-capable font on the system for subtitle rendering."""
+    try:
+        result = subprocess.run(
+            ["fc-list", ":lang=zh", "-f", "%{family}\n"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().splitlines():
+            name = line.split(",")[0].strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    # Fallback chain: common CJK fonts on various Linux distros
+    for font in [
+        "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Droid Sans Fallback",
+        "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Arial Unicode MS",
+    ]:
+        try:
+            r = subprocess.run(["fc-match", font], capture_output=True, text=True, timeout=3)
+            if font.lower().replace(" ", "") in r.stdout.lower().replace(" ", ""):
+                return font
+        except Exception:
+            continue
+    return "sans-serif"  # last resort
+
+
 def _srt_ts(seconds):
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -353,13 +380,15 @@ def ffmpeg_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
             for chunk in r.iter_content(8192):
                 f.write(chunk)
 
-    # Subtitle filter string
+    # Subtitle filter string (auto-detect CJK font for Chinese/Japanese/Korean)
     sub_filter = ""
     if srt_path:
         esc = srt_path.replace("\\", "\\\\").replace(":", "\\:")
+        cjk_font = _detect_cjk_font()
+        log(f"Subtitle font: {cjk_font}")
         sub_filter = (
             f"subtitles='{esc}':force_style="
-            f"'FontSize=24,PrimaryColour=&Hffffff&,"
+            f"'FontName={cjk_font},FontSize=24,PrimaryColour=&Hffffff&,"
             f"OutlineColour=&H000000&,Outline=2,Alignment=2,MarginV=40'"
         )
 
