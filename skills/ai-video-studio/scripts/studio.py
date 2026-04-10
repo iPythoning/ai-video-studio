@@ -3,6 +3,7 @@
 AI Video Studio — Seedance generation + CapCut Mate editing pipeline.
 
 Subcommands:
+    storyboard — AI-generate storyboard with Opus advisor (Sonnet + Opus)
     generate   — Generate a single video clip via Seedance 2.0
     compose    — Compose multiple clips into a final video via CapCut Mate
     pipeline   — End-to-end from storyboard JSON
@@ -307,6 +308,74 @@ def run_pipeline(storyboard_path):
     return result
 
 
+# ─── AI Storyboard (Sonnet + Opus Advisor) ─────────────────────────────────
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+def generate_storyboard(idea: str, ratio: str = "16:9", shots: int = 3,
+                         duration: int = 5, lang: str = "zh",
+                         max_advisor_calls: int = 2) -> dict:
+    """Use Sonnet + Opus advisor to create a production-ready storyboard JSON."""
+    if not ANTHROPIC_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY env var required for storyboard generation")
+
+    # Import advisor from same skill directory
+    skill_dir = str(Path(__file__).resolve().parent)
+    if skill_dir not in sys.path:
+        sys.path.insert(0, skill_dir)
+    import advisor as advisor_mod
+
+    client = advisor_mod.AdvisorClient(
+        api_key=ANTHROPIC_KEY,
+        advisor_system=(
+            "You are a senior creative director specializing in short-form video. "
+            "Give specific, actionable advice on shot composition, narrative arc, "
+            "visual mood, and emotional hooks. Be opinionated — mediocre ideas waste money."
+        ),
+    )
+
+    prompt = (
+        f"Create a video storyboard based on this idea: \"{idea}\"\n\n"
+        f"Requirements:\n"
+        f"- Exactly {shots} shots\n"
+        f"- Each shot {duration} seconds\n"
+        f"- Aspect ratio: {ratio}\n"
+        f"- Language for captions/narration: {lang}\n"
+        f"- Output as valid JSON with this exact structure:\n"
+        f'{{"title": "...", "ratio": "{ratio}", "lang": "{lang}", '
+        f'"tts": true, "shots": [{{"prompt": "...", "duration": {duration}, '
+        f'"caption": "...", "narration": "..."}}]}}\n\n'
+        f"Consult the advisor for creative direction before finalizing.\n"
+        f"The 'prompt' field should be a detailed English text-to-video prompt for Seedance AI.\n"
+        f"The 'caption' and 'narration' fields should be in {lang}."
+    )
+
+    result = client.run(
+        prompt,
+        executor="claude-sonnet-4-6",
+        advisor="claude-opus-4-6",
+        max_advisor_calls=max_advisor_calls,
+        system="You are a video production AI. Always output valid JSON storyboards.",
+    )
+
+    log(f"Storyboard generated: {result.advisor_calls} advisor calls, {result.turns} turns, "
+        f"{result.total_input_tokens}in/{result.total_output_tokens}out tokens")
+
+    # Extract JSON from response
+    text = result.text
+    import re
+    json_match = re.search(r'\{[\s\S]*"shots"[\s\S]*\}', text)
+    if json_match:
+        try:
+            storyboard = json.loads(json_match.group())
+            return storyboard
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: return raw text
+    log("Warning: could not extract JSON from advisor response, returning raw text")
+    return {"raw_response": text, "advisor_log": result.advisor_log}
+
+
 # ─── FFmpeg 渲染（服务端直出 mp4，不依赖剪映） ──────────────────────────────
 import subprocess
 import shutil
@@ -505,6 +574,15 @@ def main():
     sub = parser.add_subparsers(dest="cmd")
 
     # generate
+    # storyboard (AI-generated with advisor)
+    sb = sub.add_parser("storyboard", help="AI-generate storyboard with Opus advisor")
+    sb.add_argument("--idea", required=True, help="Video concept/idea in natural language")
+    sb.add_argument("--shots", type=int, default=3)
+    sb.add_argument("--duration", type=int, default=5, choices=[5, 8, 11])
+    sb.add_argument("--ratio", default="16:9")
+    sb.add_argument("--lang", default="zh")
+    sb.add_argument("--run", action="store_true", help="Immediately run pipeline after generating storyboard")
+
     gen = sub.add_parser("generate", help="Generate a single clip via Seedance")
     gen.add_argument("--prompt", required=True)
     gen.add_argument("--ratio", default="16:9")
@@ -541,7 +619,20 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    if args.cmd == "generate":
+    if args.cmd == "storyboard":
+        sb_data = generate_storyboard(args.idea, args.ratio, args.shots, args.duration, args.lang)
+        sb_path = str(MEDIA_DIR / f"storyboard-{int(time.time())}.json")
+        with open(sb_path, "w", encoding="utf-8") as f:
+            json.dump(sb_data, f, indent=2, ensure_ascii=False)
+        print(json.dumps(sb_data, indent=2, ensure_ascii=False))
+        log(f"Saved: {sb_path}")
+        if args.run and "shots" in sb_data:
+            log("Running pipeline...")
+            result = run_pipeline(sb_path)
+            if result:
+                print(json.dumps(result, indent=2))
+
+    elif args.cmd == "generate":
         path = generate_clip(args.prompt, args.ratio, args.duration, args.ref_image)
         print(path)
 
