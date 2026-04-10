@@ -22,6 +22,10 @@ SEEDANCE_KEY = os.environ.get("SEEDANCE_API_KEY", "")
 SEEDANCE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
 CAPCUT_URL = os.environ.get("CAPCUT_MATE_URL", "http://127.0.0.1:30000")
 CAPCUT_API_KEY = os.environ.get("CAPCUT_API_KEY")
+FISH_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
+FISH_URL = "https://api.fish.audio/v1/tts"
+FISH_VOICE_ZH = os.environ.get("FISH_VOICE_ZH", "59cb5986671546eaa6ca8ae6f29f6d22")  # 央视配音
+FISH_VOICE_EN = os.environ.get("FISH_VOICE_EN", "802e3bc2b27e49c2995d23ef70e6ac89")  # Energetic Male
 MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", "/root/.openclaw/media"))
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -30,6 +34,40 @@ API = lambda ep: f"{CAPCUT_URL}/openapi/capcut-mate/v1/{ep}"
 
 def log(msg):
     print(f"[studio] {msg}", flush=True)
+
+
+# ─── Fish.audio TTS ────────────────────────────────────────────────────────
+def tts_generate(text: str, voice_id: str = "", lang: str = "zh") -> str:
+    """Generate speech audio via Fish.audio TTS. Returns local mp3 path."""
+    if not voice_id:
+        voice_id = FISH_VOICE_ZH if lang.startswith("zh") else FISH_VOICE_EN
+    log(f"TTS: \"{text[:40]}...\" voice={voice_id[:12]}")
+    r = requests.post(
+        FISH_URL,
+        headers={"Authorization": f"Bearer {FISH_KEY}", "Content-Type": "application/json"},
+        json={"text": text, "reference_id": voice_id},
+        timeout=30,
+        stream=True,
+    )
+    r.raise_for_status()
+    outpath = str(MEDIA_DIR / f"tts-{int(time.time())}-{hash(text) % 10000:04d}.mp3")
+    with open(outpath, "wb") as f:
+        for chunk in r.iter_content(8192):
+            f.write(chunk)
+    size = os.path.getsize(outpath)
+    log(f"TTS done: {outpath} ({size // 1024}KB)")
+    return outpath
+
+
+def tts_narration(shots: list, lang: str = "zh", voice_id: str = "") -> list:
+    """Generate TTS narration for each shot that has a 'narration' or 'caption' field.
+    Returns list of mp3 paths (None for shots without narration)."""
+    results = [None] * len(shots)
+    for i, shot in enumerate(shots):
+        text = shot.get("narration") or shot.get("caption", "")
+        if text:
+            results[i] = tts_generate(text, voice_id, lang)
+    return results
 
 
 # ─── Seedance ──────────────────────────────────────────────────────────────
@@ -234,7 +272,19 @@ def run_pipeline(storyboard_path):
 
     log(f"Phase 1 done: {len(ok_clips)}/{len(shots)} clips ready")
 
-    # Phase 2: Compose via CapCut Mate
+    # Phase 1.5: TTS voiceover (if any shot has narration/caption + tts enabled)
+    tts_enabled = sb.get("tts", True)  # default ON
+    voice_id = sb.get("voice_id", "")
+    lang = sb.get("lang", "zh")
+    voiceovers = [None] * len(ok_clips)
+    if tts_enabled:
+        ok_shots = [shots[i] for i, _ in ok_clips]
+        has_narration = any(s.get("narration") or s.get("caption") for s in ok_shots)
+        if has_narration:
+            log("Phase 1.5: Generating TTS voiceover...")
+            voiceovers = tts_narration(ok_shots, lang, voice_id)
+
+    # Phase 2: Compose
     log("Phase 2: Composing...")
     captions = [shots[i].get("caption", "") for i, _ in ok_clips]
     paths = [p for _, p in ok_clips]
@@ -242,7 +292,8 @@ def run_pipeline(storyboard_path):
     if renderer == "ffmpeg":
         clip_durs = [s.get("duration", 5) for i, s in enumerate(shots) if clip_paths[i]]
         outpath = ffmpeg_render(paths, captions, ratio, bgm_url,
-                                clip_durations=clip_durs, title=title.replace(" ", "_"))
+                                clip_durations=clip_durs, title=title.replace(" ", "_"),
+                                voiceovers=voiceovers)
         result = {"video_path": outpath, "renderer": "ffmpeg"}
     else:
         result = compose_video(paths, captions, ratio, bgm_url,
@@ -262,31 +313,29 @@ import shutil
 import tempfile
 
 
-def _detect_cjk_font() -> str:
-    """Auto-detect a CJK-capable font on the system for subtitle rendering."""
+def _detect_cjk_font_file() -> str:
+    """Auto-detect a CJK font FILE PATH (not name) for ffmpeg drawtext."""
     try:
         result = subprocess.run(
-            ["fc-list", ":lang=zh", "-f", "%{family}\n"],
+            ["fc-list", ":lang=zh", "file"],
             capture_output=True, text=True, timeout=5,
         )
         for line in result.stdout.strip().splitlines():
-            name = line.split(",")[0].strip()
-            if name:
-                return name
+            path = line.split(":")[0].strip()
+            if path and os.path.exists(path):
+                return path
     except Exception:
         pass
-    # Fallback chain: common CJK fonts on various Linux distros
-    for font in [
-        "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Droid Sans Fallback",
-        "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Arial Unicode MS",
+    # Fallback: common paths
+    for p in [
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf",
     ]:
-        try:
-            r = subprocess.run(["fc-match", font], capture_output=True, text=True, timeout=3)
-            if font.lower().replace(" ", "") in r.stdout.lower().replace(" ", ""):
-                return font
-        except Exception:
-            continue
-    return "sans-serif"  # last resort
+        if os.path.exists(p):
+            return p
+    return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"  # last resort
 
 
 def _srt_ts(seconds):
@@ -298,8 +347,8 @@ def _srt_ts(seconds):
 
 
 def ffmpeg_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
-                  clip_durations=None, title="output"):
-    """Concatenate clips + burn subtitles + mix BGM using ffmpeg. No external deps."""
+                  clip_durations=None, title="output", voiceovers=None):
+    """Concatenate clips + burn subtitles + mix BGM + voiceover using ffmpeg."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found in PATH")
 
@@ -324,40 +373,74 @@ def ffmpeg_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
         else:
             local_clips.append(p)
 
-    # 2. Normalize each clip to same resolution + codec
+    # 2. Detect CJK font file path for drawtext
+    font_file = _detect_cjk_font_file()
+    if captions and any(c for c in captions):
+        log(f"Subtitle font file: {font_file}")
+
+    # 3. Normalize each clip + burn caption + overlay voiceover
+    vo_list = voiceovers or [None] * len(local_clips)
+    cap_list = captions or [None] * len(local_clips)
     normalized = []
     for i, clip in enumerate(local_clips):
         norm = os.path.join(tmpdir, f"norm{i}.mp4")
         dur_arg = str(durations[i]) if i < len(durations) else "5"
-        cmd = [
-            "ffmpeg", "-y", "-i", clip,
-            "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-                   f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-ar", "44100", "-ac", "2",
-            "-movflags", "+faststart", "-t", dur_arg, norm,
-        ]
-        log(f"Normalizing clip {i+1}/{len(local_clips)}...")
-        subprocess.run(cmd, capture_output=True, check=True)
+        vo = vo_list[i] if i < len(vo_list) else None
+        cap = cap_list[i] if i < len(cap_list) else None
+
+        # Build video filter chain
+        vf = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+              f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
+        if cap:
+            # drawtext: direct font file path, no libass dependency
+            esc_text = cap.replace("'", "\u2019").replace(":", "\\:")
+            vf += (f",drawtext=fontfile='{font_file}':"
+                   f"text='{esc_text}':fontsize=42:fontcolor=white:"
+                   f"borderw=3:bordercolor=black:"
+                   f"x=(w-text_w)/2:y=h-text_h-60")
+
+        if vo and os.path.exists(vo):
+            cmd = [
+                "ffmpeg", "-y", "-i", clip, "-i", vo,
+                "-filter_complex",
+                f"[0:v]{vf}[v];"
+                f"[0:a]volume=0.2[orig];[1:a]volume=1.0,apad[vo];"
+                f"[orig][vo]amix=inputs=2:duration=first[a]",
+                "-map", "[v]", "-map", "[a]",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                "-movflags", "+faststart", "-t", dur_arg, norm,
+            ]
+            log(f"Clip {i+1}/{len(local_clips)}: normalize + caption + voiceover")
+        else:
+            cmd = [
+                "ffmpeg", "-y", "-i", clip,
+                "-vf", vf,
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                "-movflags", "+faststart", "-t", dur_arg, norm,
+            ]
+            log(f"Clip {i+1}/{len(local_clips)}: normalize" + (" + caption" if cap else ""))
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            log(f"  ffmpeg warning: {result.stderr[-300:]}")
+            # Retry without caption if drawtext fails
+            if cap:
+                log(f"  Retrying without caption...")
+                vf_plain = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
+                cmd_retry = [
+                    "ffmpeg", "-y", "-i", clip, "-vf", vf_plain,
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                    "-movflags", "+faststart", "-t", dur_arg, norm,
+                ]
+                subprocess.run(cmd_retry, capture_output=True, check=True)
+            else:
+                raise RuntimeError(f"ffmpeg failed on clip {i+1}")
         normalized.append(norm)
 
-    # 3. Generate SRT subtitle file
-    srt_path = None
-    if captions:
-        srt_path = os.path.join(tmpdir, "subs.srt")
-        offset = 0.0
-        with open(srt_path, "w", encoding="utf-8") as f:
-            idx = 1
-            for i, text in enumerate(captions):
-                dur = durations[i] if i < len(durations) else 5.0
-                if not text:
-                    offset += dur
-                    continue
-                f.write(f"{idx}\n")
-                f.write(f"{_srt_ts(offset)} --> {_srt_ts(offset + dur)}\n")
-                f.write(f"{text}\n\n")
-                idx += 1
-                offset += dur
+    # Captions already burned per-clip in step 3 via drawtext. No SRT needed.
 
     # 4. Concat list file
     concat_list = os.path.join(tmpdir, "concat.txt")
@@ -380,35 +463,8 @@ def ffmpeg_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
             for chunk in r.iter_content(8192):
                 f.write(chunk)
 
-    # Subtitle filter string (auto-detect CJK font for Chinese/Japanese/Korean)
-    sub_filter = ""
-    if srt_path:
-        esc = srt_path.replace("\\", "\\\\").replace(":", "\\:")
-        cjk_font = _detect_cjk_font()
-        log(f"Subtitle font: {cjk_font}")
-        sub_filter = (
-            f"subtitles='{esc}':force_style="
-            f"'FontName={cjk_font},FontSize=24,PrimaryColour=&Hffffff&,"
-            f"OutlineColour=&H000000&,Outline=2,Alignment=2,MarginV=40'"
-        )
-
-    if bgm_local and sub_filter:
-        # Both subtitles + BGM
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", concat_list,
-            "-i", bgm_local,
-            "-filter_complex",
-            f"[0:v]{sub_filter}[vout];"
-            f"[0:a]volume=1.0[orig];"
-            f"[1:a]volume=0.3,atrim=0:{total_dur},apad[bgm];"
-            f"[orig][bgm]amix=inputs=2:duration=shortest[aout]",
-            "-map", "[vout]", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-            "-movflags", "+faststart", outpath,
-        ]
-    elif bgm_local:
-        # BGM only, no subtitles
+    # Captions already burned into clips. Final step: concat + optional BGM mix.
+    if bgm_local:
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", concat_list,
@@ -421,18 +477,7 @@ def ffmpeg_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
             "-c:v", "libx264", "-preset", "fast", "-crf", "22",
             "-movflags", "+faststart", outpath,
         ]
-    elif sub_filter:
-        # Subtitles only, no BGM
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", concat_list,
-            "-vf", sub_filter,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-            "-c:a", "aac",
-            "-movflags", "+faststart", outpath,
-        ]
     else:
-        # Plain concat
         cmd = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", concat_list,
@@ -477,6 +522,12 @@ def main():
     pipe = sub.add_parser("pipeline", help="End-to-end from storyboard JSON")
     pipe.add_argument("storyboard", help="Path to storyboard JSON file")
 
+    # tts (standalone)
+    tts = sub.add_parser("tts", help="Generate TTS audio via Fish.audio")
+    tts.add_argument("--text", required=True, help="Text to speak")
+    tts.add_argument("--voice", default="", help="Fish.audio voice/model ID")
+    tts.add_argument("--lang", default="zh", help="Language hint (zh/en)")
+
     # render (ffmpeg only, from existing clips)
     rend = sub.add_parser("render", help="FFmpeg render: concat clips + subtitles + BGM → mp4")
     rend.add_argument("--videos", required=True, help="Comma-separated video paths/URLs")
@@ -499,6 +550,10 @@ def main():
         captions = [c.strip() for c in args.captions.split(",")] if args.captions else None
         result = compose_video(videos, captions, args.ratio, args.bgm)
         print(json.dumps(result, indent=2))
+
+    elif args.cmd == "tts":
+        path = tts_generate(args.text, args.voice, args.lang)
+        print(path)
 
     elif args.cmd == "render":
         videos = [v.strip() for v in args.videos.split(",")]
