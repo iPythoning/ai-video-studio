@@ -7,7 +7,28 @@
 - **AI Video Generation** — Text/image-to-video via ByteDance Seedance 2.0 (Doubao)
 - **Smart Editing** — Auto-compose multi-shot storyboards with captions, BGM, and transitions
 - **Dual Renderer** — FFmpeg (default, server-side mp4) or CapCut Mate (Jianying draft)
+- **One-command Drama / Product Promo** — `drama` subcommand runs a four-layer pipeline (script → characters/scenes → storyboard → render) with autonomous narrative-template selection; methodology ported from [huobao-drama](https://github.com/chatfire-AI/huobao-drama) (CC BY-NC-SA 4.0, see `skills/ai-video-studio/reference/huobao/ATTRIBUTION.md`)
 - **OpenClaw Native** — Install as a skill, invoke via natural language through any channel (Telegram, WhatsApp, CLI)
+
+## One-command Scenario Video
+
+```bash
+# Scenario-based product promotion
+python3 scripts/studio.py drama \
+  --mode product \
+  --idea "Smart thermos for commuters" \
+  --scenario "morning run / subway / office" \
+  --highlights "12h heat retention, aerospace steel" \
+  --shots 6 --duration 5 --ratio 9:16 --lang en --run
+
+# Short drama
+python3 scripts/studio.py drama \
+  --mode shortdrama \
+  --idea "Café reunion: one sentence uncovers a three-year misunderstanding" \
+  --shots 6 --duration 8 --ratio 9:16 --lang zh --run
+```
+
+Requires `ANTHROPIC_API_KEY` (Sonnet executor + Opus advisor) in addition to `SEEDANCE_API_KEY`.
 
 ## Quick Start
 

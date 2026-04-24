@@ -614,6 +614,22 @@ def main():
     rend.add_argument("--bgm", default=None, help="BGM audio URL")
     rend.add_argument("--title", default="output", help="Output filename tag")
 
+    # drama (scenario-based product promo OR short drama, one-command)
+    dr = sub.add_parser(
+        "drama",
+        help="One-command scenario video: product promo or short drama (huobao-style 4-layer)",
+    )
+    dr.add_argument("--mode", choices=["product", "shortdrama"], required=True)
+    dr.add_argument("--idea", required=True, help="Core idea / product pitch in natural language")
+    dr.add_argument("--scenario", default=None, help="Usage scenario constraint (e.g. 办公室/户外/咖啡厅)")
+    dr.add_argument("--highlights", default=None, help="Product selling points (product mode)")
+    dr.add_argument("--shots", type=int, default=6)
+    dr.add_argument("--duration", type=int, default=5, choices=[5, 8, 11])
+    dr.add_argument("--ratio", default="16:9")
+    dr.add_argument("--lang", default="zh")
+    dr.add_argument("--advisor-calls", type=int, default=3, help="Max Opus advisor consultations")
+    dr.add_argument("--run", action="store_true", help="Execute the pipeline after generating the blueprint")
+
     args = parser.parse_args()
     if not args.cmd:
         parser.print_help()
@@ -651,6 +667,32 @@ def main():
         captions = [c.strip() for c in args.captions.split(",")] if args.captions else None
         outpath = ffmpeg_render(videos, captions, args.ratio, args.bgm, title=args.title)
         print(outpath)
+
+    elif args.cmd == "drama":
+        import drama_pipeline as dp
+        req = dp.DramaRequest(
+            mode=args.mode,
+            idea=args.idea,
+            shots=args.shots,
+            duration=args.duration,
+            ratio=args.ratio,
+            lang=args.lang,
+            scenario=args.scenario,
+            product_highlights=args.highlights,
+            max_advisor_calls=args.advisor_calls,
+        )
+        blueprint = dp.generate_drama(req)
+        ts = int(time.time())
+        bp_path = str(MEDIA_DIR / f"drama-{args.mode}-{ts}.json")
+        with open(bp_path, "w", encoding="utf-8") as f:
+            json.dump(blueprint, f, indent=2, ensure_ascii=False)
+        log(f"Blueprint saved: {bp_path}")
+        print(json.dumps(blueprint, indent=2, ensure_ascii=False))
+        if args.run and "shots" in blueprint and not blueprint.get("error"):
+            log("Running pipeline from drama blueprint...")
+            result = run_pipeline(bp_path)
+            if result:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
 
     elif args.cmd == "pipeline":
         result = run_pipeline(args.storyboard)
