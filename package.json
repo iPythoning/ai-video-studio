@@ -1,0 +1,32 @@
+{
+  "name": "ai-video-studio-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint .",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "render:sample": "tsx scripts/render-sample.ts"
+  },
+  "dependencies": {
+    "@remotion/captions": "^4.0.457",
+    "@remotion/renderer": "^4.0.457",
+    "lucide-react": "^0.561.0",
+    "next": "^16.2.5",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "remotion": "^4.0.457"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "^4.0.457",
+    "@types/node": "^25.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "^16.2.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

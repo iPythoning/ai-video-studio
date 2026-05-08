@@ -1,161 +1,58 @@
-# AI Video Studio
+# ClipForge Local
 
-**OpenClaw skill** for AI video generation + editing. Generate video clips with [Seedance 2.0](https://www.volcengine.com/product/doubao), edit with [CapCut Mate](https://github.com/Hommy-master/capcut-mate) or FFmpeg, and export — all server-side, no desktop app needed.
+本地优先的营销短视频自动剪辑工作台 MVP。上传文案、素材和对标视频后，系统会生成中英双语、TikTok / Reels / Shorts 三平台、每种语言三组变体的输出包。
 
-## Features
+当前版本已经合并 `iPythoning/ai-video-studio` 的核心思路：Seedance 2.0 生成视频片段、Fish Audio 生成人声、FFmpeg/Remotion 合成导出。默认是本地预览模式，不消耗外部 API；创建项目时选择“API 增强”才会调用 Seedance/Fish。
 
-- **AI Video Generation** — Text/image-to-video via ByteDance Seedance 2.0 (Doubao)
-- **Smart Editing** — Auto-compose multi-shot storyboards with captions, BGM, and transitions
-- **Dual Renderer** — FFmpeg (default, server-side mp4) or CapCut Mate (Jianying draft)
-- **One-command Drama / Product Promo** — `drama` subcommand runs a four-layer pipeline (script → characters/scenes → storyboard → render) with autonomous narrative-template selection; methodology ported from [huobao-drama](https://github.com/chatfire-AI/huobao-drama) (CC BY-NC-SA 4.0, see `skills/ai-video-studio/reference/huobao/ATTRIBUTION.md`)
-- **OpenClaw Native** — Install as a skill, invoke via natural language through any channel (Telegram, WhatsApp, CLI)
-
-## One-command Scenario Video
+## 运行
 
 ```bash
-# Scenario-based product promotion
-python3 scripts/studio.py drama \
-  --mode product \
-  --idea "Smart thermos for commuters" \
-  --scenario "morning run / subway / office" \
-  --highlights "12h heat retention, aerospace steel" \
-  --shots 6 --duration 5 --ratio 9:16 --lang en --run
-
-# Short drama
-python3 scripts/studio.py drama \
-  --mode shortdrama \
-  --idea "Café reunion: one sentence uncovers a three-year misunderstanding" \
-  --shots 6 --duration 8 --ratio 9:16 --lang zh --run
+npm install
+npm run dev
 ```
 
-Requires `ANTHROPIC_API_KEY` (Sonnet executor + Opus advisor) in addition to `SEEDANCE_API_KEY`.
+打开 `http://localhost:3000`。
 
-## Quick Start
+如果 3000 被占用，Next.js 会自动切到下一个可用端口。
 
-### As an OpenClaw Skill (recommended)
+## API 增强模式
+
+复制 `.env.example` 为 `.env.local`，填入：
 
 ```bash
-# Copy to your OpenClaw workspace
-cp -r skills/ai-video-studio ~/.openclaw/workspace/skills/
-
-# Set your Seedance API key
-export SEEDANCE_API_KEY="your-key-here"
-
-# Talk to your OpenClaw agent:
-# "Generate a 3-shot product video, 16:9, 5 seconds each, with captions"
+SEEDANCE_API_KEY=...
+FISH_AUDIO_API_KEY=...
+FISH_AUDIO_VOICE_ZH=...
+FISH_AUDIO_VOICE_EN=...
 ```
 
-### Standalone CLI
+然后在 Web 工作台的“生成模式”选择 `API 增强：Seedance + Fish Audio`。为了避免误烧额度，Seedance 默认只给 `中文 / TikTok / V1` 这条主故事板生成最多 3 个视频片段，其余平台和变体复用本地合成链路。
+
+## 输出
+
+生成结果写入 `data/outputs/<projectId>/`，包含：
+
+- 9:16 MP4 占位成片
+- SRT 字幕
+- 平台标题、描述、标签和质检报告
+- 从对标视频抽象出的 `Style Blueprint`
+
+## 架构
+
+- Next.js Web 工作台
+- Node.js API 路由负责上传、任务编排和输出
+- Node 内置 SQLite 保存项目、素材清单、风格蓝图、分镜和任务
+- FFmpeg 生成本地可播放 MP4
+- Remotion 模板位于 `remotion/`，后续可替换当前 FFmpeg 占位渲染器
+- AI 能力通过 `AdapterSet` 抽象，默认本地确定性实现；API 增强模式可调用 Seedance 2.0 和 Fish Audio，后续还可替换为 WhisperX、NLLB、OpenAI、DeepL、ElevenLabs 等
+
+## 上游合并
+
+见 `NOTICE.md`。本项目吸收了 `iPythoning/ai-video-studio` 的 MIT 代码思路，但没有复制其 `reference/huobao/` 下的 CC BY-NC-SA 非商业 prompt 文档。
+
+## 验证
 
 ```bash
-# Generate a single clip
-python3 scripts/studio.py generate \
-  --prompt "A cat yawning in golden sunlight" \
-  --ratio 16:9 --duration 5
-
-# Render existing clips into final video (FFmpeg)
-python3 scripts/studio.py render \
-  --videos clip1.mp4,clip2.mp4 \
-  --captions "Scene 1,Scene 2" \
-  --bgm https://example.com/music.mp3 \
-  --ratio 16:9
-
-# Full pipeline from storyboard
-python3 scripts/studio.py pipeline storyboard.json
+npm run test
+npm run build
 ```
-
-### Storyboard Format
-
-```json
-{
-  "title": "Product Ad",
-  "ratio": "16:9",
-  "renderer": "ffmpeg",
-  "shots": [
-    {
-      "prompt": "Modern smartphone floating in space with golden particles",
-      "duration": 5,
-      "caption": "Next-Gen Design"
-    },
-    {
-      "prompt": "Hands holding smartphone with holographic UI elements",
-      "duration": 5,
-      "caption": "Intelligence at Your Fingertips"
-    }
-  ],
-  "bgm_url": null
-}
-```
-
-## Architecture
-
-```
-User Intent
-    │
-    ▼
-┌─────────────┐    ┌──────────────┐
-│  Seedance    │───▶│  Video Clips │
-│  2.0 API     │    │  (.mp4 × N)  │
-└─────────────┘    └──────┬───────┘
-                          │
-                   ┌──────▼───────┐
-                   │   Renderer   │
-                   │              │
-                   │ ┌──────────┐ │
-                   │ │  FFmpeg  │ │ ← Default: concat + subtitle burn + BGM mix
-                   │ └──────────┘ │
-                   │ ┌──────────┐ │
-                   │ │ CapCut   │ │ ← Optional: Jianying draft with effects
-                   │ │  Mate    │ │
-                   │ └──────────┘ │
-                   └──────┬───────┘
-                          │
-                   ┌──────▼───────┐
-                   │  Final MP4   │
-                   └──────────────┘
-```
-
-## Commands
-
-| Command | Description | Dependencies |
-|---------|-------------|-------------|
-| `generate` | Generate a single clip via Seedance 2.0 | Seedance API key |
-| `compose` | Create Jianying draft via CapCut Mate | capcut-mate service |
-| `render` | FFmpeg direct render (concat + subs + BGM) | ffmpeg |
-| `pipeline` | End-to-end from storyboard JSON | Seedance + ffmpeg |
-
-## Environment Variables
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `SEEDANCE_API_KEY` | Doubao Seedance API key | Built-in fallback |
-| `CAPCUT_MATE_URL` | CapCut Mate service URL | `http://127.0.0.1:30000` |
-| `CAPCUT_API_KEY` | Jianying cloud render key (optional) | — |
-| `MEDIA_DIR` | Output directory | `/root/.openclaw/media` |
-
-## Prerequisites
-
-- Python 3.11+
-- `ffmpeg` (for render mode)
-- `requests` + `pyyaml` (pip)
-- [CapCut Mate](https://github.com/Hommy-master/capcut-mate) (optional, for compose mode)
-- [Seedance 2.0 API access](https://www.volcengine.com/product/doubao) (for generate/pipeline)
-
-## FFmpeg Render Capabilities
-
-- Multi-clip concatenation with automatic resolution normalization
-- SRT subtitle burn-in (white text, black outline, bottom-center)
-- BGM mixing (original audio 100% + BGM 30%)
-- H.264 + AAC encoding, fast preset
-- Sub-second render time for short videos
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Built With
-
-- [OpenClaw](https://openclaw.ai) — AI agent framework
-- [Seedance 2.0](https://www.volcengine.com/product/doubao) — ByteDance video generation
-- [CapCut Mate](https://github.com/Hommy-master/capcut-mate) — Open-source Jianying automation
-- [FFmpeg](https://ffmpeg.org) — Video processing
