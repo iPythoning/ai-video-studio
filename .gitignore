@@ -1,1 +1,8 @@
-__pycache__/
+node_modules
+.next
+.playwright-mcp
+out
+data
+vendor
+.env.local
+*.log
