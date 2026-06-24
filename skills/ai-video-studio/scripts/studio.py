@@ -17,12 +17,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import requests
+import draft_backend
 
 # ─── Config ────────────────────────────────────────────────────────────────
 SEEDANCE_KEY = os.environ.get("SEEDANCE_API_KEY", "")
 SEEDANCE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
 CAPCUT_URL = os.environ.get("CAPCUT_MATE_URL", "http://127.0.0.1:30000")
 CAPCUT_API_KEY = os.environ.get("CAPCUT_API_KEY")
+OPENCUT_MCP_URL = os.environ.get("OPENCUT_MCP_URL", "")  # MCP/headless render service (roadmap, see opencut_mcp_render)
+CAPCUT_DRAFT_ROOT = os.environ.get("CAPCUT_DRAFT_ROOT", "")
+JIANYING_DRAFT_ROOT = os.environ.get("JIANYING_DRAFT_ROOT", "")
 FISH_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
 FISH_URL = "https://api.fish.audio/v1/tts"
 FISH_VOICE_ZH = os.environ.get("FISH_VOICE_ZH", "59cb5986671546eaa6ca8ae6f29f6d22")  # 央视配音
@@ -135,6 +139,14 @@ def generate_clip(prompt, ratio="16:9", duration=5, ref_image=None, tag="clip"):
     return seedance_download(video_url, tag)
 
 
+def shot_existing_asset(shot: dict) -> str:
+    for key in ("asset", "video_path", "video", "clip_path", "local_path"):
+        value = shot.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
 # ─── CapCut Mate ───────────────────────────────────────────────────────────
 def capcut_post(endpoint, payload):
     r = requests.post(API(endpoint), json=payload, timeout=30)
@@ -232,6 +244,39 @@ def compose_video(video_paths, captions=None, ratio="16:9", bgm_url=None, clip_d
     return result
 
 
+def opencut_mcp_render(video_paths, captions=None, ratio="16:9", bgm_url=None,
+                       clip_durations=None, transitions=None):
+    """Render via OpenCut's MCP / headless service — agent-driven NLE backend.
+
+    PLACEHOLDER (roadmap, not shipped): OpenCut's MCP server + headless mode are
+    announced in the 2026 ground-up rewrite (new.opencut.app) but not yet
+    released. This is the drop-in seam: when it ships, implement the MCP tool
+    sequence below and this becomes a third renderer alongside ffmpeg/capcut.
+
+    Unlike ffmpeg (flat concat) and capcut-mate (Jianying draft), OpenCut exposes
+    a real timeline state model. Intended agent-native flow — each step is an MCP
+    tool call the AI COO (or this wrapper) issues:
+        1. create_project(width, height)        -> project_id
+        2. add_clips(project_id, clips[])        -> place on timeline track
+        3. add_captions(project_id, captions[])  -> text track, timed to clips
+        4. add_transitions(project_id, ...)      -> between-clip effects
+        5. add_audio(project_id, bgm_url)         -> bgm track @ 30% vol
+        6. render(project_id, headless=True)      -> mp4_url (batch/headless)
+
+    Returns the same shape as the other backends: {"video_path", "renderer"}.
+    """
+    if not OPENCUT_MCP_URL:
+        raise RuntimeError(
+            "OPENCUT_MCP_URL not set — OpenCut MCP/headless render is not yet "
+            "available (roadmap: new.opencut.app). Use renderer='ffmpeg' or "
+            "'capcut' until the MCP server ships."
+        )
+    raise NotImplementedError(
+        "opencut_mcp backend reserved — implement the MCP tool sequence once "
+        "OpenCut's MCP server is released. See docstring for the intended flow."
+    )
+
+
 # ─── Pipeline ──────────────────────────────────────────────────────────────
 def run_pipeline(storyboard_path):
     sb = json.loads(Path(storyboard_path).read_text())
@@ -248,23 +293,32 @@ def run_pipeline(storyboard_path):
 
     task_ids = []
     for i, shot in enumerate(shots):
+        existing = shot_existing_asset(shot)
+        if existing:
+            clip_paths[i] = existing
+            log(f"  Shot {i+1}: using existing asset {existing}")
+            continue
+        if not shot.get("prompt"):
+            log(f"  Shot {i+1}: skipped, no prompt or asset")
+            continue
         tid = seedance_submit(shot["prompt"], ratio, shot.get("duration", 5), shot.get("ref_image"))
         task_ids.append((i, tid, shot["prompt"]))
         log(f"  Shot {i+1}: {tid} — \"{shot['prompt'][:40]}...\"")
 
-    log("Phase 1: Polling all tasks...")
-    with ThreadPoolExecutor(max_workers=min(len(task_ids), 4)) as pool:
-        futures = {}
-        for i, tid, prompt in task_ids:
-            f = pool.submit(seedance_poll, tid)
-            futures[f] = (i, tid)
-        for f in as_completed(futures):
-            i, tid = futures[f]
-            try:
-                video_url = f.result()
-                clip_paths[i] = seedance_download(video_url, f"shot{i+1}")
-            except Exception as e:
-                log(f"  Shot {i+1} FAILED: {e}")
+    if task_ids:
+        log("Phase 1: Polling all tasks...")
+        with ThreadPoolExecutor(max_workers=min(len(task_ids), 4)) as pool:
+            futures = {}
+            for i, tid, prompt in task_ids:
+                f = pool.submit(seedance_poll, tid)
+                futures[f] = (i, tid)
+            for f in as_completed(futures):
+                i, tid = futures[f]
+                try:
+                    video_url = f.result()
+                    clip_paths[i] = seedance_download(video_url, f"shot{i+1}")
+                except Exception as e:
+                    log(f"  Shot {i+1} FAILED: {e}")
 
     ok_clips = [(i, p) for i, p in enumerate(clip_paths) if p]
     if not ok_clips:
@@ -296,6 +350,34 @@ def run_pipeline(storyboard_path):
                                 clip_durations=clip_durs, title=title.replace(" ", "_"),
                                 voiceovers=voiceovers)
         result = {"video_path": outpath, "renderer": "ffmpeg"}
+    elif renderer == "opencut_mcp":
+        clip_durs = [s.get("duration", 5) for i, s in enumerate(shots) if clip_paths[i]]
+        result = opencut_mcp_render(paths, captions, ratio, bgm_url, clip_durations=clip_durs)
+        result.setdefault("renderer", "opencut_mcp")
+    elif renderer in ("capcut_draft", "jianying_draft"):
+        backend = "capcut" if renderer == "capcut_draft" else "jianying"
+        draft_root = sb.get("draft_root") or (
+            CAPCUT_DRAFT_ROOT if backend == "capcut" else JIANYING_DRAFT_ROOT
+        )
+        if not draft_root:
+            draft_root = str(MEDIA_DIR / f"{backend}-drafts")
+        draft_storyboard = dict(sb)
+        draft_shots = []
+        for source_index, clip in ok_clips:
+            shot = dict(shots[source_index])
+            shot["asset"] = clip
+            if source_index < len(voiceovers) and voiceovers[source_index]:
+                shot["voiceover"] = voiceovers[source_index]
+            draft_shots.append(shot)
+        draft_storyboard["shots"] = draft_shots
+        result = draft_backend.render_draft_manifest(
+            draft_storyboard,
+            backend=backend,
+            draft_root=draft_root,
+            output_dir=MEDIA_DIR,
+            draft_name=sb.get("draft_name") or title.replace(" ", "_"),
+            execute=bool(sb.get("draft_execute")),
+        )
     else:
         result = compose_video(paths, captions, ratio, bgm_url,
                                clip_durations=[s.get("duration", 5) for i, s in enumerate(shots) if clip_paths[i]])
@@ -351,8 +433,6 @@ def generate_storyboard(idea: str, ratio: str = "16:9", shots: int = 3,
 
     result = client.run(
         prompt,
-        executor="claude-sonnet-4-6",
-        advisor="claude-opus-4-6",
         max_advisor_calls=max_advisor_calls,
         system="You are a video production AI. Always output valid JSON storyboards.",
     )
@@ -600,6 +680,14 @@ def main():
     pipe = sub.add_parser("pipeline", help="End-to-end from storyboard JSON")
     pipe.add_argument("storyboard", help="Path to storyboard JSON file")
 
+    # draft
+    draft = sub.add_parser("draft", help="Create Jianying/CapCut draft manifests from storyboard JSON")
+    draft.add_argument("storyboard", help="Path to storyboard JSON file")
+    draft.add_argument("--backend", choices=["capcut", "jianying"], default="capcut")
+    draft.add_argument("--draft-root", default="", help="CapCut/Jianying draft folder")
+    draft.add_argument("--name", default="", help="Draft name prefix")
+    draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
+
     # tts (standalone)
     tts = sub.add_parser("tts", help="Generate TTS audio via Fish.audio")
     tts.add_argument("--text", required=True, help="Text to speak")
@@ -667,6 +755,23 @@ def main():
         captions = [c.strip() for c in args.captions.split(",")] if args.captions else None
         outpath = ffmpeg_render(videos, captions, args.ratio, args.bgm, title=args.title)
         print(outpath)
+
+    elif args.cmd == "draft":
+        sb_data = json.loads(Path(args.storyboard).read_text(encoding="utf-8"))
+        draft_root = args.draft_root or (
+            CAPCUT_DRAFT_ROOT if args.backend == "capcut" else JIANYING_DRAFT_ROOT
+        )
+        if not draft_root:
+            draft_root = str(MEDIA_DIR / f"{args.backend}-drafts")
+        result = draft_backend.render_draft_manifest(
+            sb_data,
+            backend=args.backend,
+            draft_root=draft_root,
+            output_dir=MEDIA_DIR,
+            draft_name=args.name or sb_data.get("title", "ai-video").replace(" ", "_"),
+            execute=args.execute,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
 
     elif args.cmd == "drama":
         import drama_pipeline as dp
