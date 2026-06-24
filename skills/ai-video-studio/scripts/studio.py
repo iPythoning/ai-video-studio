@@ -18,6 +18,7 @@ from pathlib import Path
 
 import requests
 import draft_backend
+import draft_templates
 
 # ─── Config ────────────────────────────────────────────────────────────────
 SEEDANCE_KEY = os.environ.get("SEEDANCE_API_KEY", "")
@@ -390,6 +391,36 @@ def run_pipeline(storyboard_path):
     return result
 
 
+def render_template_draft_from_brief(
+    brief_path: str,
+    assets: list[str],
+    *,
+    backend: str = "capcut",
+    draft_root: str = "",
+    template_id: str = "ugc_hook_cta",
+    locales: list[str] | None = None,
+    variants: int = 3,
+    execute: bool = False,
+) -> dict:
+    brief = json.loads(Path(brief_path).read_text(encoding="utf-8"))
+    root = draft_root or (
+        CAPCUT_DRAFT_ROOT if backend == "capcut" else JIANYING_DRAFT_ROOT
+    )
+    if not root:
+        root = str(MEDIA_DIR / f"{backend}-drafts")
+    return draft_templates.render_template_draft_package(
+        brief,
+        assets,
+        backend=backend,
+        draft_root=root,
+        output_dir=MEDIA_DIR,
+        template_id=template_id,
+        locales=locales or ["zh", "en"],
+        variants=variants,
+        execute=execute,
+    )
+
+
 # ─── AI Storyboard (Sonnet + Opus Advisor) ─────────────────────────────────
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -688,6 +719,16 @@ def main():
     draft.add_argument("--name", default="", help="Draft name prefix")
     draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
 
+    template_draft = sub.add_parser("template-draft", help="Create multilingual template drafts from brief JSON + assets")
+    template_draft.add_argument("brief", help="Path to product brief JSON")
+    template_draft.add_argument("--assets", required=True, help="Comma-separated local video/image assets")
+    template_draft.add_argument("--backend", choices=["capcut", "jianying"], default="capcut")
+    template_draft.add_argument("--draft-root", default="", help="CapCut/Jianying draft folder")
+    template_draft.add_argument("--template", default="ugc_hook_cta", help="Built-in template id")
+    template_draft.add_argument("--locales", default="zh,en", help="Comma-separated locales, first is source")
+    template_draft.add_argument("--variants", type=int, default=3)
+    template_draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
+
     # tts (standalone)
     tts = sub.add_parser("tts", help="Generate TTS audio via Fish.audio")
     tts.add_argument("--text", required=True, help="Text to speak")
@@ -769,6 +810,19 @@ def main():
             draft_root=draft_root,
             output_dir=MEDIA_DIR,
             draft_name=args.name or sb_data.get("title", "ai-video").replace(" ", "_"),
+            execute=args.execute,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    elif args.cmd == "template-draft":
+        result = render_template_draft_from_brief(
+            args.brief,
+            [item.strip() for item in args.assets.split(",") if item.strip()],
+            backend=args.backend,
+            draft_root=args.draft_root,
+            template_id=args.template,
+            locales=[item.strip() for item in args.locales.split(",") if item.strip()],
+            variants=args.variants,
             execute=args.execute,
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))

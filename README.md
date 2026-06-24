@@ -69,6 +69,12 @@ python3 scripts/studio.py pipeline storyboard.json
 python3 scripts/studio.py draft storyboard.json --backend capcut --draft-root "/path/to/CapCut Drafts"
 python3 scripts/studio.py draft storyboard.json --backend jianying --draft-root "/path/to/JianyingPro Drafts"
 
+# Create 3 variants × zh/en local draft manifests from a product brief and real-shot assets
+python3 scripts/studio.py template-draft brief.json \
+  --assets "/path/to/demo1.mp4,/path/to/demo2.mp4" \
+  --backend capcut --draft-root "/path/to/CapCut Drafts" \
+  --template ugc_hook_cta --locales zh,en --variants 3
+
 # Turn social comment exports into reviewable reply jobs
 python3 scripts/social_replies.py comments.json --db social.sqlite --brand ClipForge --url https://example.com/buy
 ```
@@ -122,6 +128,49 @@ For real-shot material entering the local draft backend, put a local asset path 
 ```
 
 This writes one draft-plan JSON per locale. The next execution layer can map those operations to `pycapcut` or `pyJianYingDraft`.
+
+### Multilingual Template Drafts
+
+`scripts/draft_templates.py` turns a product brief plus real-shot assets into reusable CapCut/Jianying draft packages. The first built-in template is `ugc_hook_cta`:
+
+- 3 slots: hook, benefit, CTA
+- 9:16 default canvas and lower-third-safe captions
+- `variants` controls how many creative cuts are produced
+- `locales` controls language manifests, for example `zh,en`
+- no Seedance, no Anthropic, no TTS required; it uses existing local assets
+
+Example brief:
+
+```json
+{
+  "product_name": "智能保温杯",
+  "brand_name": "ClipForge",
+  "audience": "通勤族",
+  "selling_points": ["12小时保温", "一键开盖"],
+  "cta": "现在领取试用",
+  "slug": "mug-campaign"
+}
+```
+
+The HTTP service exposes the same local-first template flow at `POST /draft/template`:
+
+```json
+{
+  "brief": {
+    "product_name": "智能保温杯",
+    "brand_name": "ClipForge",
+    "audience": "通勤族",
+    "selling_points": ["12小时保温"],
+    "cta": "现在领取试用",
+    "slug": "mug-campaign"
+  },
+  "assets": ["/path/to/demo.mp4"],
+  "backend": "capcut",
+  "template_id": "ugc_hook_cta",
+  "locales": ["zh", "en"],
+  "variants": 3
+}
+```
 
 ### Social Comment Reply Queue
 
@@ -190,6 +239,7 @@ User Intent
 | `compose` | Create Jianying draft via CapCut Mate | capcut-mate service |
 | `render` | FFmpeg direct render (concat + subs + BGM) | ffmpeg |
 | `pipeline` | End-to-end from storyboard JSON | Seedance + ffmpeg |
+| `template-draft` | Product brief + local assets → multilingual draft manifests | stdlib + draft backend |
 | `social_replies.py` | Turn comment exports into reviewable reply jobs | stdlib SQLite |
 
 ## Environment Variables

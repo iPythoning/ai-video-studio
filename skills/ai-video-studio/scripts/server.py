@@ -24,11 +24,12 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import studio
 import drama_pipeline as dp
 import draft_backend
+import draft_templates
 import social_replies
 
 _log = logging.getLogger("video_studio")
@@ -80,6 +81,26 @@ class DraftResponse(BaseModel):
     locales: list[str]
     operations: int
     execution: list[dict] | None = None
+
+
+class TemplateDraftRequest(BaseModel):
+    brief: dict
+    assets: list[str]
+    backend: Literal["capcut", "jianying"] = "capcut"
+    draft_root: str | None = None
+    template_id: str = "ugc_hook_cta"
+    locales: list[str] = Field(default_factory=lambda: ["zh", "en"])
+    variants: int = 3
+    execute: bool = False
+
+
+class TemplateDraftResponse(BaseModel):
+    renderer: str
+    template_id: str
+    variants: int
+    locales: list[str]
+    draft_plan_paths: list[str]
+    outputs: list[dict]
 
 
 class SocialReplyRequest(BaseModel):
@@ -141,6 +162,25 @@ def _plan_social_replies(req: SocialReplyRequest) -> dict:
     return {"db_path": db_path, "ingest": ingest, "planned": len(jobs), "jobs": jobs}
 
 
+def _render_template_draft(req: TemplateDraftRequest) -> dict:
+    draft_root = req.draft_root or os.environ.get(
+        "CAPCUT_DRAFT_ROOT" if req.backend == "capcut" else "JIANYING_DRAFT_ROOT",
+        str(MEDIA_DIR / f"{req.backend}-drafts"),
+    )
+    result = draft_templates.render_template_draft_package(
+        req.brief,
+        req.assets,
+        backend=req.backend,
+        draft_root=draft_root,
+        output_dir=MEDIA_DIR,
+        template_id=req.template_id,
+        locales=req.locales,
+        variants=req.variants,
+        execute=req.execute,
+    )
+    return {"renderer": f"{req.backend}_draft", **result}
+
+
 @app.post("/blueprint", response_model=BlueprintResponse)
 async def blueprint(req: GenerateRequest) -> BlueprintResponse:
     """Dry-run: storyboard only (ANTHROPIC_API_KEY), zero Seedance spend."""
@@ -191,6 +231,17 @@ async def draft(req: DraftRequest) -> DraftResponse:
         _log.exception("draft_failed")
         raise HTTPException(status_code=500, detail=type(e).__name__) from e
     return DraftResponse(**result)
+
+
+@app.post("/draft/template", response_model=TemplateDraftResponse)
+async def template_draft(req: TemplateDraftRequest) -> TemplateDraftResponse:
+    """Create multilingual template draft manifests from real-shot assets."""
+    try:
+        result = await asyncio.to_thread(_render_template_draft, req)
+    except Exception as e:
+        _log.exception("template_draft_failed")
+        raise HTTPException(status_code=500, detail=type(e).__name__) from e
+    return TemplateDraftResponse(**result)
 
 
 @app.post("/social/replies/plan", response_model=SocialReplyResponse)
