@@ -42,6 +42,12 @@ class CommentStore:
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 
+    def __enter__(self) -> "CommentStore":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def ingest(self, raw_comments: list[RawComment]) -> dict[str, int]:
         inserted = 0
         duplicates = 0
@@ -194,10 +200,10 @@ def plan_reply_workflow(
     db_path: str | Path,
     policy: ReplyPolicy | None = None,
 ) -> dict[str, object]:
-    store = CommentStore(db_path)
     raw_comments = load_comments(comments_path)
-    ingest = store.ingest(raw_comments)
-    jobs = store.plan_reply_jobs(policy or ReplyPolicy())
+    with CommentStore(db_path) as store:
+        ingest = store.ingest(raw_comments)
+        jobs = store.plan_reply_jobs(policy or ReplyPolicy())
     return {"ingest": ingest, "planned": len(jobs), "jobs": jobs}
 
 

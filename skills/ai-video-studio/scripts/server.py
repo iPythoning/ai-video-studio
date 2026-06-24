@@ -29,6 +29,7 @@ from pydantic import BaseModel
 import studio
 import drama_pipeline as dp
 import draft_backend
+import social_replies
 
 _log = logging.getLogger("video_studio")
 MEDIA_DIR: Path = studio.MEDIA_DIR
@@ -81,6 +82,21 @@ class DraftResponse(BaseModel):
     execution: list[dict] | None = None
 
 
+class SocialReplyRequest(BaseModel):
+    comments: list[dict]
+    db_path: str | None = None
+    brand_name: str = ""
+    product_url: str = ""
+    human_review_terms: list[str] | None = None
+
+
+class SocialReplyResponse(BaseModel):
+    db_path: str
+    ingest: dict[str, int]
+    planned: int
+    jobs: list[dict]
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "media_dir": str(MEDIA_DIR)}
@@ -108,6 +124,21 @@ def _run_drama(req: GenerateRequest) -> dict:
     if not result or not result.get("video_path"):
         raise RuntimeError(f"render produced no mp4: {result}")
     return {"result": result, "blueprint_path": str(bp_path), "shots": len(blueprint["shots"])}
+
+
+def _plan_social_replies(req: SocialReplyRequest) -> dict:
+    db_path = req.db_path or str(MEDIA_DIR / "social-replies.sqlite")
+    policy = social_replies.ReplyPolicy(
+        brand_name=req.brand_name,
+        product_url=req.product_url,
+        human_review_terms=tuple(req.human_review_terms)
+        if req.human_review_terms
+        else social_replies.ReplyPolicy().human_review_terms,
+    )
+    with social_replies.CommentStore(db_path) as store:
+        ingest = store.ingest(req.comments)
+        jobs = store.plan_reply_jobs(policy)
+    return {"db_path": db_path, "ingest": ingest, "planned": len(jobs), "jobs": jobs}
 
 
 @app.post("/blueprint", response_model=BlueprintResponse)
@@ -160,3 +191,14 @@ async def draft(req: DraftRequest) -> DraftResponse:
         _log.exception("draft_failed")
         raise HTTPException(status_code=500, detail=type(e).__name__) from e
     return DraftResponse(**result)
+
+
+@app.post("/social/replies/plan", response_model=SocialReplyResponse)
+async def social_replies_plan(req: SocialReplyRequest) -> SocialReplyResponse:
+    """Normalize comment exports and create reviewable reply jobs. No sender."""
+    try:
+        result = await asyncio.to_thread(_plan_social_replies, req)
+    except Exception as e:
+        _log.exception("social_replies_plan_failed")
+        raise HTTPException(status_code=500, detail=type(e).__name__) from e
+    return SocialReplyResponse(**result)

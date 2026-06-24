@@ -135,6 +135,25 @@ This writes one draft-plan JSON per locale. The next execution layer can map tho
 
 Later platform adapters can plug into this queue as `CommentProvider` and `ReplySender` layers, including the TzFilm-style "export comments → plan replies → controlled browser send" pattern.
 
+The HTTP service exposes the same safe planning layer at `POST /social/replies/plan`:
+
+```json
+{
+  "comments": [
+    {
+      "platform": "youtube",
+      "comment_id": "yt-1",
+      "video_id": "short-1",
+      "author": "lee",
+      "text": "How much is this?"
+    }
+  ],
+  "db_path": "social.sqlite",
+  "brand_name": "ClipForge",
+  "product_url": "https://example.com/buy"
+}
+```
+
 ## Architecture
 
 ```
