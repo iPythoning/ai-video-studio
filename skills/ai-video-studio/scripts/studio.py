@@ -399,6 +399,7 @@ def render_template_draft_from_brief(
     draft_root: str = "",
     template_id: str = "ugc_hook_cta",
     locales: list[str] | None = None,
+    platforms: list[str] | None = None,
     variants: int = 3,
     execute: bool = False,
 ) -> dict:
@@ -416,6 +417,7 @@ def render_template_draft_from_brief(
         output_dir=MEDIA_DIR,
         template_id=template_id,
         locales=locales or ["zh", "en"],
+        platforms=platforms,
         variants=variants,
         execute=execute,
     )
@@ -726,6 +728,7 @@ def main():
     template_draft.add_argument("--draft-root", default="", help="CapCut/Jianying draft folder")
     template_draft.add_argument("--template", default="ugc_hook_cta", help="Built-in template id")
     template_draft.add_argument("--locales", default="zh,en", help="Comma-separated locales, first is source")
+    template_draft.add_argument("--platforms", default="", help="Comma-separated platforms: tiktok,reels,shorts")
     template_draft.add_argument("--variants", type=int, default=3)
     template_draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
 
@@ -822,6 +825,7 @@ def main():
             draft_root=args.draft_root,
             template_id=args.template,
             locales=[item.strip() for item in args.locales.split(",") if item.strip()],
+            platforms=[item.strip() for item in args.platforms.split(",") if item.strip()] or None,
             variants=args.variants,
             execute=args.execute,
         )

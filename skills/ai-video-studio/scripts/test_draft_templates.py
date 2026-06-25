@@ -83,6 +83,42 @@ class DraftTemplatesTest(unittest.TestCase):
             self.assertEqual(en_plan["locale"], "en")
             self.assertEqual(zh_plan["operations"][1]["path"], str(clip))
 
+    def test_renders_platform_locale_variant_matrix_with_safe_zone_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clip = root / "demo.mp4"
+            clip.write_bytes(b"video")
+            brief = {
+                "product_name": "智能保温杯",
+                "audience": "通勤族",
+                "selling_points": ["12小时保温"],
+                "cta": "现在领取试用",
+                "slug": "mug-campaign",
+            }
+
+            result = draft_templates.render_template_draft_package(
+                brief,
+                [str(clip)],
+                backend="capcut",
+                draft_root=str(root / "CapCut Drafts"),
+                output_dir=root / "out",
+                template_id="ugc_hook_cta",
+                locales=["zh", "en"],
+                platforms=["tiktok", "shorts"],
+                variants=2,
+            )
+
+            self.assertEqual(result["platforms"], ["tiktok", "shorts"])
+            self.assertEqual(len(result["outputs"]), 4)
+            self.assertEqual(len(result["draft_plan_paths"]), 8)
+            first_plan = json.loads(Path(result["draft_plan_paths"][0]).read_text(encoding="utf-8"))
+            shorts_plan = json.loads(Path(result["draft_plan_paths"][4]).read_text(encoding="utf-8"))
+            self.assertEqual(first_plan["platform"], "tiktok")
+            self.assertEqual(first_plan["template"]["safe_zones"]["bottom"], 340)
+            self.assertEqual(first_plan["operations"][0]["platform"], "tiktok")
+            self.assertEqual(shorts_plan["platform"], "shorts")
+            self.assertEqual(shorts_plan["template"]["safe_zones"]["bottom"], 300)
+
 
 if __name__ == "__main__":
     unittest.main()

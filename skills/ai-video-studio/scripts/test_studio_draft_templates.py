@@ -44,6 +44,7 @@ class StudioDraftTemplatesTest(unittest.TestCase):
                     draft_root=str(root / "CapCut Drafts"),
                     template_id="ugc_hook_cta",
                     locales=["zh", "en"],
+                    platforms=["tiktok", "shorts"],
                     variants=1,
                 )
             finally:
@@ -51,7 +52,8 @@ class StudioDraftTemplatesTest(unittest.TestCase):
 
             self.assertEqual(result["template_id"], "ugc_hook_cta")
             self.assertEqual(result["variants"], 1)
-            self.assertEqual(len(result["draft_plan_paths"]), 2)
+            self.assertEqual(result["platforms"], ["tiktok", "shorts"])
+            self.assertEqual(len(result["draft_plan_paths"]), 4)
             self.assertTrue(all(Path(path).exists() for path in result["draft_plan_paths"]))
 
 

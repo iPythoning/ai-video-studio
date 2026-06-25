@@ -90,6 +90,7 @@ class TemplateDraftRequest(BaseModel):
     draft_root: str | None = None
     template_id: str = "ugc_hook_cta"
     locales: list[str] = Field(default_factory=lambda: ["zh", "en"])
+    platforms: list[str] = Field(default_factory=list)
     variants: int = 3
     execute: bool = False
 
@@ -99,6 +100,7 @@ class TemplateDraftResponse(BaseModel):
     template_id: str
     variants: int
     locales: list[str]
+    platforms: list[str]
     draft_plan_paths: list[str]
     outputs: list[dict]
 
@@ -175,6 +177,7 @@ def _render_template_draft(req: TemplateDraftRequest) -> dict:
         output_dir=MEDIA_DIR,
         template_id=req.template_id,
         locales=req.locales,
+        platforms=req.platforms or None,
         variants=req.variants,
         execute=req.execute,
     )

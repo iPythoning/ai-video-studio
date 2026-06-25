@@ -29,6 +29,7 @@ def build_draft_plan(
     ratio = storyboard.get("ratio", "9:16")
     canvas = _canvas_for_ratio(ratio)
     lang = storyboard.get("lang", "zh")
+    platform = storyboard.get("platform", "")
     localized = storyboard.get("locales") or {}
     source_locales = [lang, *[key for key in localized.keys() if key != lang]]
 
@@ -40,6 +41,7 @@ def build_draft_plan(
             "draft_name": title,
             "canvas": canvas,
             "template": storyboard.get("template") or {},
+            "platform": platform,
         }
     ]
 
@@ -98,6 +100,8 @@ def build_draft_plan(
         "draft_root": str(Path(draft_root)),
         "canvas": canvas,
         "ratio": ratio,
+        "platform": platform,
+        "template": storyboard.get("template") or {},
         "duration": offset,
         "source_locales": source_locales,
         "operations": operations,

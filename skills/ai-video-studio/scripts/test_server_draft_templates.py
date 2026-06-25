@@ -31,6 +31,7 @@ class ServerDraftTemplatesTest(unittest.TestCase):
                 draft_root=str(root / "Jianying Drafts"),
                 template_id="ugc_hook_cta",
                 locales=["zh", "en"],
+                platforms=["tiktok", "shorts"],
                 variants=2,
             )
 
@@ -40,8 +41,11 @@ class ServerDraftTemplatesTest(unittest.TestCase):
             self.assertEqual(result["template_id"], "ugc_hook_cta")
             self.assertEqual(result["variants"], 2)
             self.assertEqual(result["locales"], ["zh", "en"])
-            self.assertEqual(len(result["draft_plan_paths"]), 4)
+            self.assertEqual(result["platforms"], ["tiktok", "shorts"])
+            self.assertEqual(len(result["draft_plan_paths"]), 8)
             self.assertTrue(all(Path(path).exists() for path in result["draft_plan_paths"]))
+            response = server.TemplateDraftResponse(**result)
+            self.assertEqual(response.platforms, ["tiktok", "shorts"])
 
 
 def _load_server(media_dir: Path):

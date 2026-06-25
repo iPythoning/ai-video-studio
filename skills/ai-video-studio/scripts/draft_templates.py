@@ -42,12 +42,32 @@ BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
+PLATFORM_PROFILES: dict[str, dict[str, Any]] = {
+    "tiktok": {
+        "caption_position": "lower-third-safe",
+        "safe_zones": {"top": 160, "bottom": 340, "left": 48, "right": 180},
+        "max_duration": 45,
+    },
+    "reels": {
+        "caption_position": "lower-third-safe",
+        "safe_zones": {"top": 180, "bottom": 320, "left": 48, "right": 120},
+        "max_duration": 45,
+    },
+    "shorts": {
+        "caption_position": "lower-third-safe",
+        "safe_zones": {"top": 160, "bottom": 300, "left": 48, "right": 120},
+        "max_duration": 45,
+    },
+}
+
+
 def build_template_storyboards(
     brief: dict[str, Any],
     assets: list[str],
     *,
     template_id: str = "ugc_hook_cta",
     locales: list[str] | None = None,
+    platforms: list[str] | None = None,
     variants: int = 3,
 ) -> list[dict[str, Any]]:
     if not assets:
@@ -57,25 +77,31 @@ def build_template_storyboards(
     base_lang = locales[0]
     count = max(1, int(variants))
     storyboards = []
-    for variant_index in range(count):
-        context = _context(brief, variant_index)
-        shots = _shots_for_locale(template, assets, base_lang, context)
-        storyboard = {
-            "title": brief.get("title") or brief.get("product_name") or "Template Draft",
-            "draft_name": f"{_slug(brief, variant_index)}-v{variant_index + 1}",
-            "ratio": template.get("ratio", "9:16"),
-            "renderer": template.get("renderer", "capcut_draft"),
-            "lang": base_lang,
-            "template": dict(template["template"]),
-            "shots": shots,
-            "locales": {},
-        }
-        for locale in locales[1:]:
-            storyboard["locales"][locale] = {
-                "title": _localized_title(brief, locale),
-                "shots": _shots_for_locale(template, assets, locale, context, include_assets=False),
+    platform_order = platforms or [""]
+    for platform in platform_order:
+        for variant_index in range(count):
+            context = _context(brief, variant_index)
+            profile = _platform_profile(platform)
+            shots = _shots_for_locale(template, assets, base_lang, context)
+            storyboard = {
+                "title": brief.get("title") or brief.get("product_name") or "Template Draft",
+                "draft_name": _draft_name(brief, variant_index, platform),
+                "ratio": template.get("ratio", "9:16"),
+                "renderer": template.get("renderer", "capcut_draft"),
+                "lang": base_lang,
+                "variant": variant_index + 1,
+                "template": _template_with_profile(template, platform, profile),
+                "shots": shots,
+                "locales": {},
             }
-        storyboards.append(_sanitize_storyboard(storyboard, brief.get("forbidden_words") or []))
+            if platform:
+                storyboard["platform"] = platform
+            for locale in locales[1:]:
+                storyboard["locales"][locale] = {
+                    "title": _localized_title(brief, locale),
+                    "shots": _shots_for_locale(template, assets, locale, context, include_assets=False),
+                }
+            storyboards.append(_sanitize_storyboard(storyboard, brief.get("forbidden_words") or []))
     return storyboards
 
 
@@ -88,6 +114,7 @@ def render_template_draft_package(
     output_dir: str | Path,
     template_id: str = "ugc_hook_cta",
     locales: list[str] | None = None,
+    platforms: list[str] | None = None,
     variants: int = 3,
     execute: bool = False,
 ) -> dict[str, Any]:
@@ -96,6 +123,7 @@ def render_template_draft_package(
         assets,
         template_id=template_id,
         locales=locales,
+        platforms=platforms,
         variants=variants,
     )
     outputs = []
@@ -109,12 +137,19 @@ def render_template_draft_package(
             draft_name=storyboard["draft_name"],
             execute=execute,
         )
-        outputs.append({"variant": index, **rendered})
+        outputs.append(
+            {
+                "variant": storyboard.get("variant", index),
+                "platform": storyboard.get("platform", ""),
+                **rendered,
+            }
+        )
         paths.extend(rendered["draft_plan_paths"])
     return {
         "template_id": template_id,
-        "variants": len(storyboards),
+        "variants": variants,
         "locales": locales or ["zh", "en"],
+        "platforms": platforms or [],
         "draft_plan_paths": paths,
         "outputs": outputs,
     }
@@ -124,6 +159,28 @@ def _template(template_id: str) -> dict[str, Any]:
     if template_id not in BUILTIN_TEMPLATES:
         raise ValueError(f"unknown template: {template_id}")
     return BUILTIN_TEMPLATES[template_id]
+
+
+def _platform_profile(platform: str) -> dict[str, Any]:
+    if not platform:
+        return {}
+    if platform not in PLATFORM_PROFILES:
+        raise ValueError(f"unknown platform: {platform}")
+    return PLATFORM_PROFILES[platform]
+
+
+def _template_with_profile(
+    template: dict[str, Any],
+    platform: str,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(template["template"])
+    if profile:
+        merged["platform"] = platform
+        merged["caption_position"] = profile["caption_position"]
+        merged["safe_zones"] = dict(profile["safe_zones"])
+        merged["max_duration"] = profile["max_duration"]
+    return merged
 
 
 def _shots_for_locale(
@@ -205,6 +262,14 @@ def _slug(brief: dict[str, Any], variant_index: int) -> str:
     base = aliases.get(base, base)
     safe = "".join(ch.lower() if ch.isalnum() else "-" for ch in base)
     return safe.strip("-") or f"campaign-{variant_index + 1}"
+
+
+def _draft_name(brief: dict[str, Any], variant_index: int, platform: str) -> str:
+    parts = [_slug(brief, variant_index)]
+    if platform:
+        parts.append(platform)
+    parts.append(f"v{variant_index + 1}")
+    return "-".join(parts)
 
 
 def _english_product(product: str) -> str:
