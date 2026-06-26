@@ -74,7 +74,7 @@ python3 scripts/studio.py template-draft brief.json \
   --assets "/path/to/demo1.mp4,/path/to/demo2.mp4" \
   --backend capcut --draft-root "/path/to/CapCut Drafts" \
   --template ugc_hook_cta --locales zh,en \
-  --platforms tiktok,reels,shorts --variants 3
+  --platforms tiktok,reels,shorts --creative-copy local --variants 3
 
 # Turn social comment exports into reviewable reply jobs
 python3 scripts/social_replies.py comments.json --db social.sqlite --brand ClipForge --url https://example.com/buy
@@ -140,6 +140,7 @@ This writes one draft-plan JSON per locale. The next execution layer can map tho
 - `locales` controls language manifests, for example `zh,en`
 - `platforms` controls social platform packaging, for example `tiktok,reels,shorts`
 - each platform profile carries safe-zone metadata for captions and UI overlays
+- `--creative-copy local` generates platform/language/variant-specific hook, benefit, and CTA copy without any LLM API
 - no Seedance, no Anthropic, no TTS required; it uses existing local assets
 
 Example brief:
@@ -172,6 +173,7 @@ The HTTP service exposes the same local-first template flow at `POST /draft/temp
   "template_id": "ugc_hook_cta",
   "locales": ["zh", "en"],
   "platforms": ["tiktok", "reels", "shorts"],
+  "creative_copy_mode": "local",
   "variants": 3
 }
 ```

@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import creative_copy
 import draft_backend
 
 
@@ -69,6 +70,7 @@ def build_template_storyboards(
     locales: list[str] | None = None,
     platforms: list[str] | None = None,
     variants: int = 3,
+    creative_copy_mode: str = "",
 ) -> list[dict[str, Any]]:
     if not assets:
         raise ValueError("at least one asset is required")
@@ -78,18 +80,36 @@ def build_template_storyboards(
     count = max(1, int(variants))
     storyboards = []
     platform_order = platforms or [""]
+    copy_matrix = (
+        creative_copy.build_copy_matrix(
+            brief,
+            platforms=platform_order,
+            locales=locales,
+            variants=count,
+        )
+        if creative_copy_mode == "local"
+        else []
+    )
     for platform in platform_order:
         for variant_index in range(count):
             context = _context(brief, variant_index)
             profile = _platform_profile(platform)
-            shots = _shots_for_locale(template, assets, base_lang, context)
+            variant = variant_index + 1
+            shots = _shots_for_locale(
+                template,
+                assets,
+                base_lang,
+                context,
+                copy_entry=_copy_entry(copy_matrix, platform, base_lang, variant),
+            )
             storyboard = {
                 "title": brief.get("title") or brief.get("product_name") or "Template Draft",
                 "draft_name": _draft_name(brief, variant_index, platform),
                 "ratio": template.get("ratio", "9:16"),
                 "renderer": template.get("renderer", "capcut_draft"),
                 "lang": base_lang,
-                "variant": variant_index + 1,
+                "variant": variant,
+                "copy_source": creative_copy_mode,
                 "template": _template_with_profile(template, platform, profile),
                 "shots": shots,
                 "locales": {},
@@ -99,7 +119,14 @@ def build_template_storyboards(
             for locale in locales[1:]:
                 storyboard["locales"][locale] = {
                     "title": _localized_title(brief, locale),
-                    "shots": _shots_for_locale(template, assets, locale, context, include_assets=False),
+                    "shots": _shots_for_locale(
+                        template,
+                        assets,
+                        locale,
+                        context,
+                        include_assets=False,
+                        copy_entry=_copy_entry(copy_matrix, platform, locale, variant),
+                    ),
                 }
             storyboards.append(_sanitize_storyboard(storyboard, brief.get("forbidden_words") or []))
     return storyboards
@@ -117,6 +144,7 @@ def render_template_draft_package(
     platforms: list[str] | None = None,
     variants: int = 3,
     execute: bool = False,
+    creative_copy_mode: str = "",
 ) -> dict[str, Any]:
     storyboards = build_template_storyboards(
         brief,
@@ -125,6 +153,7 @@ def render_template_draft_package(
         locales=locales,
         platforms=platforms,
         variants=variants,
+        creative_copy_mode=creative_copy_mode,
     )
     outputs = []
     paths: list[str] = []
@@ -150,6 +179,7 @@ def render_template_draft_package(
         "variants": variants,
         "locales": locales or ["zh", "en"],
         "platforms": platforms or [],
+        "copy_source": creative_copy_mode,
         "draft_plan_paths": paths,
         "outputs": outputs,
     }
@@ -190,10 +220,15 @@ def _shots_for_locale(
     context: dict[str, str],
     *,
     include_assets: bool = True,
+    copy_entry: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     shots = []
+    slot_texts = _slot_texts(copy_entry)
     for index, slot in enumerate(template["slots"]):
-        caption = _render(slot.get(locale) or slot.get("en") or slot.get("zh") or "", context)
+        caption = slot_texts.get(slot["id"]) or _render(
+            slot.get(locale) or slot.get("en") or slot.get("zh") or "",
+            context,
+        )
         shot = {
             "duration": slot.get("duration", 5),
             "caption": caption,
@@ -203,6 +238,23 @@ def _shots_for_locale(
             shot["asset"] = assets[index % len(assets)]
         shots.append(shot)
     return shots
+
+
+def _copy_entry(
+    matrix: list[dict[str, Any]],
+    platform: str,
+    locale: str,
+    variant: int,
+) -> dict[str, Any] | None:
+    if not matrix:
+        return None
+    return creative_copy.find_copy(matrix, platform=platform, locale=locale, variant=variant)
+
+
+def _slot_texts(copy_entry: dict[str, Any] | None) -> dict[str, str]:
+    if not copy_entry:
+        return {}
+    return {str(slot["id"]): str(slot["text"]) for slot in copy_entry.get("slots", [])}
 
 
 def _context(brief: dict[str, Any], variant_index: int) -> dict[str, str]:

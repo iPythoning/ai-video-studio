@@ -401,6 +401,7 @@ def render_template_draft_from_brief(
     locales: list[str] | None = None,
     platforms: list[str] | None = None,
     variants: int = 3,
+    creative_copy_mode: str = "",
     execute: bool = False,
 ) -> dict:
     brief = json.loads(Path(brief_path).read_text(encoding="utf-8"))
@@ -419,6 +420,7 @@ def render_template_draft_from_brief(
         locales=locales or ["zh", "en"],
         platforms=platforms,
         variants=variants,
+        creative_copy_mode=creative_copy_mode,
         execute=execute,
     )
 
@@ -729,6 +731,7 @@ def main():
     template_draft.add_argument("--template", default="ugc_hook_cta", help="Built-in template id")
     template_draft.add_argument("--locales", default="zh,en", help="Comma-separated locales, first is source")
     template_draft.add_argument("--platforms", default="", help="Comma-separated platforms: tiktok,reels,shorts")
+    template_draft.add_argument("--creative-copy", choices=["", "local"], default="", help="Generate slot copy with local rules")
     template_draft.add_argument("--variants", type=int, default=3)
     template_draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
 
@@ -827,6 +830,7 @@ def main():
             locales=[item.strip() for item in args.locales.split(",") if item.strip()],
             platforms=[item.strip() for item in args.platforms.split(",") if item.strip()] or None,
             variants=args.variants,
+            creative_copy_mode=args.creative_copy,
             execute=args.execute,
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))

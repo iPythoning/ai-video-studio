@@ -33,6 +33,7 @@ class ServerDraftTemplatesTest(unittest.TestCase):
                 locales=["zh", "en"],
                 platforms=["tiktok", "shorts"],
                 variants=2,
+                creative_copy_mode="local",
             )
 
             result = server._render_template_draft(req)
@@ -42,10 +43,12 @@ class ServerDraftTemplatesTest(unittest.TestCase):
             self.assertEqual(result["variants"], 2)
             self.assertEqual(result["locales"], ["zh", "en"])
             self.assertEqual(result["platforms"], ["tiktok", "shorts"])
+            self.assertEqual(result["copy_source"], "local")
             self.assertEqual(len(result["draft_plan_paths"]), 8)
             self.assertTrue(all(Path(path).exists() for path in result["draft_plan_paths"]))
             response = server.TemplateDraftResponse(**result)
             self.assertEqual(response.platforms, ["tiktok", "shorts"])
+            self.assertEqual(response.copy_source, "local")
 
 
 def _load_server(media_dir: Path):

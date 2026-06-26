@@ -91,6 +91,7 @@ class TemplateDraftRequest(BaseModel):
     template_id: str = "ugc_hook_cta"
     locales: list[str] = Field(default_factory=lambda: ["zh", "en"])
     platforms: list[str] = Field(default_factory=list)
+    creative_copy_mode: Literal["", "local"] = ""
     variants: int = 3
     execute: bool = False
 
@@ -101,6 +102,7 @@ class TemplateDraftResponse(BaseModel):
     variants: int
     locales: list[str]
     platforms: list[str]
+    copy_source: str
     draft_plan_paths: list[str]
     outputs: list[dict]
 
@@ -180,6 +182,7 @@ def _render_template_draft(req: TemplateDraftRequest) -> dict:
         platforms=req.platforms or None,
         variants=req.variants,
         execute=req.execute,
+        creative_copy_mode=req.creative_copy_mode,
     )
     return {"renderer": f"{req.backend}_draft", **result}
 
