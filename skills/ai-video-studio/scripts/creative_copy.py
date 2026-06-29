@@ -5,10 +5,16 @@ or commercial model adapters can return the same copy matrix shape.
 """
 from __future__ import annotations
 
-from typing import Any
+import os
+import subprocess
+import json
+import shlex
+from typing import Any, Callable
 
 
 SLOT_IDS = ("hook", "benefit", "cta")
+CopyAdapter = Callable[[dict[str, Any], list[str], list[str], int], list[dict[str, Any]]]
+_ADAPTERS: dict[str, CopyAdapter] = {}
 
 
 def build_copy_matrix(
@@ -17,10 +23,47 @@ def build_copy_matrix(
     platforms: list[str] | None = None,
     locales: list[str] | None = None,
     variants: int = 3,
+    adapter: str = "local",
 ) -> list[dict[str, Any]]:
     platform_order = platforms or [""]
     locale_order = locales or ["zh", "en"]
     count = max(1, int(variants))
+    selected = _adapter(adapter)
+    if selected is not _local_rules_adapter:
+        return _tag_adapter(selected(brief, platform_order, locale_order, count), adapter)
+    return _tag_adapter(_local_rules_adapter(brief, platform_order, locale_order, count), adapter)
+
+
+def register_copy_adapter(name: str, adapter: CopyAdapter) -> None:
+    if not name:
+        raise ValueError("adapter name is required")
+    _ADAPTERS[name] = adapter
+
+
+def unregister_copy_adapter(name: str) -> None:
+    _ADAPTERS.pop(name, None)
+
+
+def available_adapters() -> list[str]:
+    return sorted(["local", "local_rules", "local_llm", "anthropic", "doubao", *_ADAPTERS.keys()])
+
+
+def _adapter(name: str) -> CopyAdapter:
+    if name in ("", "local", "local_rules"):
+        return _local_rules_adapter
+    if name in _ADAPTERS:
+        return _ADAPTERS[name]
+    if name in {"local_llm", "anthropic", "doubao"}:
+        return _command_adapter(name)
+    raise ValueError(f"unknown creative copy adapter: {name}. Available: {', '.join(available_adapters())}")
+
+
+def _local_rules_adapter(
+    brief: dict[str, Any],
+    platform_order: list[str],
+    locale_order: list[str],
+    count: int,
+) -> list[dict[str, Any]]:
     matrix = []
     for platform in platform_order:
         for variant in range(1, count + 1):
@@ -33,6 +76,46 @@ def build_copy_matrix(
                         "slots": _slots(brief, platform, locale, variant),
                     }
                 )
+    return matrix
+
+
+def _command_adapter(name: str) -> CopyAdapter:
+    env_name = f"CREATIVE_COPY_{name.upper()}_COMMAND"
+    command = os.environ.get(env_name, "")
+    if not command:
+        raise RuntimeError(f"{env_name} is required to use creative copy adapter '{name}'")
+
+    def run_command(
+        brief: dict[str, Any],
+        platforms: list[str],
+        locales: list[str],
+        variants: int,
+    ) -> list[dict[str, Any]]:
+        payload = {
+            "brief": brief,
+            "platforms": platforms,
+            "locales": locales,
+            "variants": variants,
+        }
+        result = subprocess.run(
+            shlex.split(command),
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        if not isinstance(data, list):
+            raise ValueError(f"{env_name} must output a JSON list")
+        return data
+
+    return run_command
+
+
+def _tag_adapter(matrix: list[dict[str, Any]], adapter: str) -> list[dict[str, Any]]:
+    source = adapter or "local"
+    for item in matrix:
+        item.setdefault("source_adapter", source)
     return matrix
 
 

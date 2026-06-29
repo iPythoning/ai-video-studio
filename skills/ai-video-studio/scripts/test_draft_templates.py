@@ -142,14 +142,14 @@ class DraftTemplatesTest(unittest.TestCase):
                 locales=["zh", "en"],
                 platforms=["tiktok", "shorts"],
                 variants=2,
-                creative_copy_mode="local",
+                creative_copy_mode="local_rules",
             )
 
             tiktok_zh = json.loads(Path(result["draft_plan_paths"][0]).read_text(encoding="utf-8"))
             shorts_en = json.loads(Path(result["draft_plan_paths"][-1]).read_text(encoding="utf-8"))
             tiktok_caption = next(op["text"] for op in tiktok_zh["operations"] if op["op"] == "add_caption")
             shorts_caption = next(op["text"] for op in shorts_en["operations"] if op["op"] == "add_caption")
-            self.assertEqual(result["copy_source"], "local")
+            self.assertEqual(result["copy_source"], "local_rules")
             self.assertIn("3秒", tiktok_caption)
             self.assertIn("15 seconds", shorts_caption)
 

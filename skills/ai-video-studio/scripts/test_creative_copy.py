@@ -39,6 +39,46 @@ class CreativeCopyTest(unittest.TestCase):
         self.assertIn("one-tap lid", shorts_en["slots"][1]["text"])
         self.assertEqual(shorts_en["slots"][2]["text"], "Claim your trial now")
 
+    def test_can_register_and_select_copy_adapter_by_name(self):
+        def custom_adapter(brief, platforms, locales, variants):
+            return [
+                {
+                    "platform": platforms[0],
+                    "locale": locales[0],
+                    "variant": 1,
+                    "slots": [
+                        {"id": "hook", "text": f"{brief['product_name']} custom hook"},
+                        {"id": "benefit", "text": "custom benefit"},
+                        {"id": "cta", "text": "custom cta"},
+                    ],
+                }
+            ]
+
+        creative_copy.register_copy_adapter("unit_test", custom_adapter)
+        try:
+            matrix = creative_copy.build_copy_matrix(
+                {"product_name": "智能保温杯"},
+                platforms=["tiktok"],
+                locales=["zh"],
+                variants=1,
+                adapter="unit_test",
+            )
+        finally:
+            creative_copy.unregister_copy_adapter("unit_test")
+
+        self.assertEqual(matrix[0]["source_adapter"], "unit_test")
+        self.assertEqual(matrix[0]["slots"][0]["text"], "智能保温杯 custom hook")
+
+    def test_reserved_model_adapters_fail_with_actionable_error_when_unconfigured(self):
+        with self.assertRaisesRegex(RuntimeError, "CREATIVE_COPY_ANTHROPIC_COMMAND"):
+            creative_copy.build_copy_matrix(
+                {"product_name": "智能保温杯"},
+                platforms=["tiktok"],
+                locales=["zh"],
+                variants=1,
+                adapter="anthropic",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

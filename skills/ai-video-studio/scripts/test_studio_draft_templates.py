@@ -46,7 +46,7 @@ class StudioDraftTemplatesTest(unittest.TestCase):
                     locales=["zh", "en"],
                     platforms=["tiktok", "shorts"],
                     variants=1,
-                    creative_copy_mode="local",
+                    creative_copy_mode="local_rules",
                 )
             finally:
                 studio.MEDIA_DIR = old_media_dir
@@ -54,7 +54,7 @@ class StudioDraftTemplatesTest(unittest.TestCase):
             self.assertEqual(result["template_id"], "ugc_hook_cta")
             self.assertEqual(result["variants"], 1)
             self.assertEqual(result["platforms"], ["tiktok", "shorts"])
-            self.assertEqual(result["copy_source"], "local")
+            self.assertEqual(result["copy_source"], "local_rules")
             self.assertEqual(len(result["draft_plan_paths"]), 4)
             self.assertTrue(all(Path(path).exists() for path in result["draft_plan_paths"]))
 

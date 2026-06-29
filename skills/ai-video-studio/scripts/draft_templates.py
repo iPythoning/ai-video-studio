@@ -86,8 +86,9 @@ def build_template_storyboards(
             platforms=platform_order,
             locales=locales,
             variants=count,
+            adapter=creative_copy_mode,
         )
-        if creative_copy_mode == "local"
+        if creative_copy_mode
         else []
     )
     for platform in platform_order:

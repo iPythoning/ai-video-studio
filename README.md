@@ -74,7 +74,7 @@ python3 scripts/studio.py template-draft brief.json \
   --assets "/path/to/demo1.mp4,/path/to/demo2.mp4" \
   --backend capcut --draft-root "/path/to/CapCut Drafts" \
   --template ugc_hook_cta --locales zh,en \
-  --platforms tiktok,reels,shorts --creative-copy local --variants 3
+  --platforms tiktok,reels,shorts --creative-copy local_rules --variants 3
 
 # Turn social comment exports into reviewable reply jobs
 python3 scripts/social_replies.py comments.json --db social.sqlite --brand ClipForge --url https://example.com/buy
@@ -140,7 +140,8 @@ This writes one draft-plan JSON per locale. The next execution layer can map tho
 - `locales` controls language manifests, for example `zh,en`
 - `platforms` controls social platform packaging, for example `tiktok,reels,shorts`
 - each platform profile carries safe-zone metadata for captions and UI overlays
-- `--creative-copy local` generates platform/language/variant-specific hook, benefit, and CTA copy without any LLM API
+- `--creative-copy local_rules` generates platform/language/variant-specific hook, benefit, and CTA copy without any LLM API
+- `--creative-copy local_llm|anthropic|doubao` runs a JSON-in/JSON-out command adapter configured by `CREATIVE_COPY_*_COMMAND`
 - no Seedance, no Anthropic, no TTS required; it uses existing local assets
 
 Example brief:
@@ -173,10 +174,21 @@ The HTTP service exposes the same local-first template flow at `POST /draft/temp
   "template_id": "ugc_hook_cta",
   "locales": ["zh", "en"],
   "platforms": ["tiktok", "reels", "shorts"],
-  "creative_copy_mode": "local",
+  "creative_copy_mode": "local_rules",
   "variants": 3
 }
 ```
+
+Creative copy adapters:
+
+| Adapter | Behavior |
+|---------|----------|
+| `local` / `local_rules` | Built-in no-key rules |
+| `local_llm` | Runs `CREATIVE_COPY_LOCAL_LLM_COMMAND` |
+| `anthropic` | Runs `CREATIVE_COPY_ANTHROPIC_COMMAND` |
+| `doubao` | Runs `CREATIVE_COPY_DOUBAO_COMMAND` |
+
+Command adapters receive JSON on stdin: `brief`, `platforms`, `locales`, `variants`. They must print a JSON list shaped like `creative_copy.build_copy_matrix(...)`.
 
 ### Social Comment Reply Queue
 

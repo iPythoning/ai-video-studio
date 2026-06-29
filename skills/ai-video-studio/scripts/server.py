@@ -91,7 +91,7 @@ class TemplateDraftRequest(BaseModel):
     template_id: str = "ugc_hook_cta"
     locales: list[str] = Field(default_factory=lambda: ["zh", "en"])
     platforms: list[str] = Field(default_factory=list)
-    creative_copy_mode: Literal["", "local"] = ""
+    creative_copy_mode: Literal["", "local", "local_rules", "local_llm", "anthropic", "doubao"] = ""
     variants: int = 3
     execute: bool = False
 

@@ -731,7 +731,12 @@ def main():
     template_draft.add_argument("--template", default="ugc_hook_cta", help="Built-in template id")
     template_draft.add_argument("--locales", default="zh,en", help="Comma-separated locales, first is source")
     template_draft.add_argument("--platforms", default="", help="Comma-separated platforms: tiktok,reels,shorts")
-    template_draft.add_argument("--creative-copy", choices=["", "local"], default="", help="Generate slot copy with local rules")
+    template_draft.add_argument(
+        "--creative-copy",
+        choices=["", "local", "local_rules", "local_llm", "anthropic", "doubao"],
+        default="",
+        help="Creative copy adapter",
+    )
     template_draft.add_argument("--variants", type=int, default=3)
     template_draft.add_argument("--execute", action="store_true", help="Execute manifests with pycapcut/pyJianYingDraft")
 
